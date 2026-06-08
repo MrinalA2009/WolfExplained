@@ -1,428 +1,725 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Reveal } from "../components/Reveal";
-import { PageHeader } from "../components/PageHeader";
+import { useMemo, useState, useRef } from "react";
+import { WOLF_DEMO_EVENTS } from "../data/wolfDemoGame";
+import { parseWolfEvents } from "../lib/wolfParser";
+import { useReplay } from "../lib/useReplay";
+import { ROLE_COLORS, PLAYERS } from "../lib/wolfTypes";
+import type { PlayerState, ReplayEvent, GameSnapshot } from "../lib/wolfTypes";
 
 export const Route = createFileRoute("/experience")({
   head: () => ({
     meta: [
-      { title: "Experience WOLF — Live Simulation" },
-      { name: "description", content: "Step inside a live WOLF simulation. Inspect agents, trust networks, and reasoning in real time." },
-      { property: "og:title", content: "Experience WOLF" },
-      { property: "og:description", content: "Live multi-agent deception simulation." },
+      { title: "Experience WOLF — Simulation Replay" },
+      { name: "description", content: "Replay an actual WOLF multi-agent simulation. Watch agents debate, deceive, and vote in real time." },
     ],
   }),
-  component: Experience,
+  component: ExperiencePage,
 });
 
-// ---------------- Simulation model ----------------
+// ─── SVG layout constants ─────────────────────────────────────────────────────
+const CX = 280, CY = 255, R = 185, NODE_R = 26;
+const PLAYER_ORDER = PLAYERS.map(p => p.name);
 
-type Role = "villager" | "wolf" | "seer" | "doctor";
-interface Agent {
-  id: number;
-  name: string;
-  role: Role;
-  alive: boolean;
-  trust: Record<number, number>;
-  suspicion: Record<number, number>;
-}
-interface Event { round: number; phase: "day" | "night"; text: string; actor?: number; target?: number; }
-
-const NAMES = ["Aria", "Boden", "Cyra", "Doran", "Elin", "Faye", "Gage", "Hale"];
-
-function makeInitial(): { agents: Agent[]; events: Event[] } {
-  const roles: Role[] = ["wolf", "wolf", "seer", "doctor", "villager", "villager", "villager", "villager"];
-  // shuffle deterministic
-  const order = [3, 6, 1, 7, 0, 4, 2, 5];
-  const agents: Agent[] = NAMES.map((name, i) => ({
-    id: i, name, role: roles[order.indexOf(i)] ?? "villager", alive: true,
-    trust: Object.fromEntries(NAMES.map((_, j) => [j, 0.5])),
-    suspicion: Object.fromEntries(NAMES.map((_, j) => [j, 0.2])),
-  }));
-  return { agents, events: [{ round: 0, phase: "day", text: "Eight agents convene. The game begins." }] };
+function playerPos(name: string): { x: number; y: number } {
+  const idx = PLAYER_ORDER.indexOf(name);
+  const i   = idx < 0 ? 0 : idx;
+  const a   = (i / PLAYER_ORDER.length) * Math.PI * 2 - Math.PI / 2;
+  return { x: CX + Math.cos(a) * R, y: CY + Math.sin(a) * R };
 }
 
-const SCRIPT: Event[] = [
-  { round: 1, phase: "day", text: "Aria suggests Doran's silence is suspicious.", actor: 0, target: 3 },
-  { round: 1, phase: "day", text: "Cyra defends Doran, citing his early support.", actor: 2, target: 3 },
-  { round: 1, phase: "day", text: "Village votes — Hale is eliminated.", actor: 7 },
-  { round: 1, phase: "night", text: "Wolves convene. Elin is taken in the night.", target: 4 },
-  { round: 2, phase: "day", text: "Boden, the Seer, hints he knows a wolf.", actor: 1 },
-  { round: 2, phase: "day", text: "Faye accuses Boden of bluffing.", actor: 5, target: 1 },
-  { round: 2, phase: "day", text: "Vote splits — Faye is eliminated.", actor: 5 },
-  { round: 2, phase: "night", text: "Doctor saves Boden. The wolves miss.", actor: 6 },
-  { round: 3, phase: "day", text: "Boden publicly names Cyra as a wolf.", actor: 1, target: 2 },
-  { round: 3, phase: "day", text: "Cyra is eliminated. She was a wolf.", target: 2 },
-];
+const PHASE_LABEL: Record<string, string> = {
+  start:              "Game Starting",
+  eliminate:          "Night · Wolves Strike",
+  protect:            "Night · Doctor Acts",
+  unmask:             "Night · Seer Investigates",
+  resolve_night:      "Dawn · Night Resolves",
+  check_winner_night: "Dawn · Checking Victory",
+  debate:             "Day · Village Debate",
+  vote:               "Day · Village Vote",
+  exile:              "Day · Exile",
+  check_winner_day:   "Day · Checking Victory",
+  end:                "Game Over",
+};
 
-function applyEvent(agents: Agent[], ev: Event): Agent[] {
-  const next = agents.map(a => ({ ...a, trust: { ...a.trust }, suspicion: { ...a.suspicion } }));
-  if (/eliminated|taken/.test(ev.text) && ev.target != null) {
-    const t = next.find(a => a.id === ev.target);
-    if (t) t.alive = false;
-  }
-  if (ev.actor != null && ev.target != null && ev.actor !== ev.target) {
-    const actor = next[ev.actor];
-    if (/accuses|suspicious|names/i.test(ev.text)) {
-      actor.suspicion[ev.target] = Math.min(1, (actor.suspicion[ev.target] ?? 0) + 0.25);
-      // others mildly suspect too
-      next.forEach(a => { if (a.id !== ev.actor) a.suspicion[ev.target!] = Math.min(1, (a.suspicion[ev.target!] ?? 0) + 0.08); });
-    }
-    if (/defends|support/i.test(ev.text)) {
-      actor.trust[ev.target] = Math.min(1, (actor.trust[ev.target] ?? 0.5) + 0.2);
-    }
-  }
-  return next;
+function suspicionColor(score: number): string {
+  const h = Math.round((1 - score) * 220);
+  return `hsl(${h}, 75%, 55%)`;
 }
 
-function Experience() {
-  const [tick, setTick] = useState(0);              // 0..SCRIPT.length
-  const [playing, setPlaying] = useState(false);
-  const [speed, setSpeed] = useState(1);
-  const [selected, setSelected] = useState<number | null>(null);
+// ─── Initial game snapshot (shown before replay starts) ──────────────────────
+const INITIAL_GS: GameSnapshot = {
+  round:        0,
+  phase:        "start",
+  players:      PLAYERS.map(p => ({
+    id: p.name.toLowerCase(), name: p.name, role: p.role,
+    status: "alive", suspicionScore: 0.5, trustScore: 0.5, isSpeaking: false,
+  })),
+  alivePlayers: PLAYERS.map(p => p.name),
+  votes: {}, debateLog: [], deceptionScores: {},
+  winner: null, eliminated: null, protected: null,
+  exiled: null, unmasked: null, announcement: null,
+};
 
-  const { agents, events } = useMemo(() => {
-    const init = makeInitial();
-    let agents = init.agents;
-    const events = [...init.events];
-    for (let i = 0; i < tick; i++) {
-      agents = applyEvent(agents, SCRIPT[i]);
-      events.push(SCRIPT[i]);
-    }
-    return { agents, events };
-  }, [tick]);
-
-  useEffect(() => {
-    if (!playing) return;
-    const id = setInterval(() => {
-      setTick(t => {
-        if (t >= SCRIPT.length) { setPlaying(false); return t; }
-        return t + 1;
-      });
-    }, 2400 / speed);
-    return () => clearInterval(id);
-  }, [playing, speed]);
-
-  const round = tick === 0 ? 0 : SCRIPT[Math.max(0, tick - 1)].round;
-  const phase = tick === 0 ? "day" : SCRIPT[Math.max(0, tick - 1)].phase;
+// ─────────────────────────────────────────────────────────────────────────────
+//  AgentNode
+// ─────────────────────────────────────────────────────────────────────────────
+interface ANProps {
+  player: PlayerState; pos: { x: number; y: number };
+  mode: "watch" | "research"; selected: boolean; onClick: () => void;
+}
+function AgentNode({ player, pos, mode, selected, onClick }: ANProps) {
+  const alive     = player.status === "alive";
+  const roleColor = ROLE_COLORS[player.role];
+  const nodeColor = mode === "research" ? roleColor : "#64748b";
+  const opacity   = alive ? 1 : 0.22;
+  const arcR      = NODE_R + 7;
+  const circum    = 2 * Math.PI * arcR;
+  const dash      = player.suspicionScore * circum;
 
   return (
-    <div className="relative">
-      <PageHeader
-        section="Experience"
-        kicker="LIVE SIMULATION"
-        title={<>Watch eight minds reason, <span className="text-foreground/55">lie, and uncover the truth.</span></>}
-        description="A scripted recreation of a real eight-agent game. Click any agent to inspect their state. Scrub the timeline to move through rounds."
+    <g
+      transform={`translate(${pos.x},${pos.y})`}
+      onClick={alive ? onClick : undefined}
+      style={{ cursor: alive ? "pointer" : "default", opacity, transition: "opacity 0.6s" }}
+    >
+      {/* Research: suspicion arc */}
+      {mode === "research" && alive && (
+        <circle cx={0} cy={0} r={arcR}
+          fill="none"
+          stroke={suspicionColor(player.suspicionScore)}
+          strokeWidth={3}
+          strokeDasharray={`${dash} ${circum - dash}`}
+          strokeLinecap="round"
+          transform="rotate(-90)"
+          opacity={0.85}
+        />
+      )}
+
+      {/* Selection ring */}
+      {selected && (
+        <circle cx={0} cy={0} r={NODE_R + 11}
+          fill="none" stroke="white" strokeWidth={1.5} opacity={0.5}
+        />
+      )}
+
+      {/* Speaking pulse */}
+      {player.isSpeaking && (
+        <circle cx={0} cy={0} r={NODE_R + 3}
+          fill="none" stroke={nodeColor} strokeWidth={2} opacity={0}
+        >
+          <animate attributeName="r"       values={`${NODE_R+3};${NODE_R+12};${NODE_R+3}`} dur="1.4s" repeatCount="indefinite"/>
+          <animate attributeName="opacity" values="0.6;0;0.6"                             dur="1.4s" repeatCount="indefinite"/>
+        </circle>
+      )}
+
+      {/* Node circle */}
+      <circle cx={0} cy={0} r={NODE_R}
+        fill={player.isSpeaking ? nodeColor : "rgba(15,23,42,0.85)"}
+        stroke={nodeColor}
+        strokeWidth={player.isSpeaking ? 0 : 2}
+        style={{ transition: "fill 0.3s, stroke 0.3s" }}
       />
 
-      <section className="mx-auto max-w-7xl px-6 mt-10">
-        <Reveal>
-          <div className="glass rounded-2xl px-5 py-3 inline-flex items-center gap-6 text-sm">
-            <Stat label="Round" value={`0${round}`} />
-            <Divider />
-            <Stat label="Phase" value={phase.toUpperCase()} accent={phase === "night" ? "electric" : "gold"} />
-            <Divider />
-            <Stat label="Alive" value={`${agents.filter(a => a.alive).length}/8`} />
-          </div>
-        </Reveal>
-      </section>
-
-      {/* Stage */}
-      <section className="mx-auto max-w-7xl px-6 mt-10">
-        <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
-          <Stage agents={agents} selected={selected} onSelect={setSelected} phase={phase as "day" | "night"} />
-          <SidePanel agent={selected != null ? agents[selected] : null} agents={agents} events={events} />
-        </div>
-
-        {/* Controls + timeline */}
-        <div className="glass-strong mt-6 rounded-2xl p-4 sm:p-5 flex items-center gap-4 flex-wrap">
-          <div className="flex items-center gap-2">
-            <CtrlButton onClick={() => { setTick(0); setSelected(null); setPlaying(false); }} label="Restart" icon="↺" />
-            <CtrlButton onClick={() => setPlaying(p => !p)} label={playing ? "Pause" : "Play"} icon={playing ? "❚❚" : "▶"} primary />
-            <CtrlButton onClick={() => setTick(t => Math.max(0, t - 1))} label="Back" icon="◂" />
-            <CtrlButton onClick={() => setTick(t => Math.min(SCRIPT.length, t + 1))} label="Next" icon="▸" />
-          </div>
-
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span className="font-mono uppercase tracking-[0.2em]">Speed</span>
-            {[0.5, 1, 2].map(s => (
-              <button
-                key={s}
-                onClick={() => setSpeed(s)}
-                className={`rounded-full px-2.5 py-1 font-mono text-[11px] transition ${
-                  speed === s ? "bg-gold text-background" : "glass hover:text-foreground"
-                }`}
-              >
-                {s}×
-              </button>
-            ))}
-          </div>
-
-          <div className="flex-1 min-w-[260px]">
-            <input
-              type="range"
-              min={0}
-              max={SCRIPT.length}
-              value={tick}
-              onChange={(e) => setTick(parseInt(e.target.value))}
-              className="w-full accent-[var(--gold)]"
-            />
-            <div className="mt-1 flex justify-between font-mono text-[10px] text-muted-foreground/70 tracking-[0.2em]">
-              <span>T0</span><span>R1</span><span>R2</span><span>R3</span><span>END</span>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="mx-auto max-w-7xl px-6 mt-10 grid gap-4 md:grid-cols-3">
-        <Legend swatch="white" label="Villager" desc="Common townsfolk seeking the wolves." />
-        <Legend swatch="gold" label="Special role" desc="Seer & Doctor — informational advantages." />
-        <Legend swatch="electric" label="Wolf" desc="Hidden, coordinating, eliminating by night." />
-      </section>
-    </div>
-  );
-}
-
-function Stat({ label, value, accent }: { label: string; value: string; accent?: "gold" | "electric" }) {
-  return (
-    <div>
-      <div className="font-mono text-[10px] tracking-[0.25em] text-muted-foreground">{label}</div>
-      <div
-        className="mt-0.5 font-display text-base"
-        style={{ color: accent === "electric" ? "var(--electric)" : accent === "gold" ? "var(--gold)" : undefined }}
+      {/* Initial letter */}
+      <text textAnchor="middle" dominantBaseline="central"
+        fontSize="13" fontWeight="700"
+        fill={player.isSpeaking ? "#0f172a" : nodeColor}
       >
-        {value}
-      </div>
-    </div>
+        {player.name[0]}
+      </text>
+
+      {/* Name label */}
+      <text textAnchor="middle" y={NODE_R + 15} fontSize="10.5"
+        fill={alive ? "rgba(226,232,240,0.9)" : "#334155"}
+        fontWeight={player.isSpeaking ? "700" : "400"}
+      >
+        {player.name}
+      </text>
+
+      {/* Role label (research only) */}
+      {mode === "research" && alive && (
+        <text textAnchor="middle" y={NODE_R + 27} fontSize="8.5"
+          fill={roleColor} opacity={0.75}
+        >
+          {player.role}
+        </text>
+      )}
+
+      {/* Eliminated cross */}
+      {!alive && (
+        <text textAnchor="middle" dominantBaseline="central"
+          fontSize="22" fill="#ef4444" opacity={0.7}
+        >
+          ✕
+        </text>
+      )}
+    </g>
   );
 }
-function Divider() { return <span className="h-8 w-px bg-white/10" />; }
 
-function CtrlButton({ onClick, label, icon, primary }: { onClick: () => void; label: string; icon: string; primary?: boolean }) {
-  return (
-    <button
-      onClick={onClick}
-      title={label}
-      className={`btn-magnetic h-10 min-w-10 rounded-full px-3 text-sm flex items-center gap-2 ${
-        primary ? "bg-gold text-background" : "glass hover:glow-electric"
-      }`}
-    >
-      <span className="font-mono">{icon}</span>
-      <span className="hidden sm:inline text-xs tracking-wide">{label}</span>
-    </button>
-  );
-}
+// ─────────────────────────────────────────────────────────────────────────────
+//  Speaking bubble (SVG foreign-object)
+// ─────────────────────────────────────────────────────────────────────────────
+function SpeakingBubble({ agent, msg }: { agent: string; msg: string }) {
+  const pos = playerPos(agent);
+  // Place bubble toward the center of the circle
+  const dx = CX - pos.x, dy = CY - pos.y;
+  const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+  const bx = pos.x + (dx / dist) * (NODE_R + 78);
+  const by = pos.y + (dy / dist) * (NODE_R + 52);
+  const tailDx = pos.x - bx, tailDy = pos.y - by;
+  const tailLen = Math.sqrt(tailDx * tailDx + tailDy * tailDy) || 1;
+  const tailX = bx + (tailDx / tailLen) * 34;
+  const tailY = by + (tailDy / tailLen) * 34;
+  const w = 168, h = 64;
 
-function Legend({ swatch, label, desc }: { swatch: "gold" | "electric" | "white"; label: string; desc: string }) {
-  const color = swatch === "gold" ? "var(--gold)" : swatch === "electric" ? "var(--electric)" : "white";
   return (
-    <div className="glass rounded-2xl p-5 flex items-start gap-3">
-      <span
-        className="mt-1 h-3 w-3 rounded-full"
-        style={{ background: color, boxShadow: `0 0 12px ${color}` }}
+    <g style={{ pointerEvents: "none" }}>
+      <rect x={bx - w / 2} y={by - h / 2} width={w} height={h} rx={9}
+        fill="#0f172a" stroke="#334155" strokeWidth={1}
       />
-      <div>
-        <div className="text-sm font-medium">{label}</div>
-        <div className="text-xs text-muted-foreground mt-1">{desc}</div>
-      </div>
-    </div>
+      <line x1={bx} y1={by + h / 2 - 2} x2={tailX} y2={tailY}
+        stroke="#334155" strokeWidth={1}
+      />
+      <circle cx={tailX} cy={tailY} r={3} fill="#334155"/>
+      <foreignObject x={bx - w / 2 + 8} y={by - h / 2 + 7} width={w - 16} height={h - 14}>
+        <div style={{ fontSize: "9.5px", color: "#cbd5e1", lineHeight: "1.45", overflow: "hidden", height: "100%" }}>
+          {msg.length > 100 ? msg.slice(0, 98) + "…" : msg}
+        </div>
+      </foreignObject>
+    </g>
   );
 }
 
-// ---------------- Stage (SVG agent network) ----------------
-
-function Stage({
-  agents, selected, onSelect, phase,
-}: { agents: Agent[]; selected: number | null; onSelect: (i: number | null) => void; phase: "day" | "night" }) {
-  const size = 560;
-  const cx = size / 2, cy = size / 2, R = 220;
-
-  const positions = agents.map((_, i) => {
-    const a = (i / agents.length) * Math.PI * 2 - Math.PI / 2;
-    return { x: cx + Math.cos(a) * R, y: cy + Math.sin(a) * R };
-  });
-
+// ─────────────────────────────────────────────────────────────────────────────
+//  Vote arrows
+// ─────────────────────────────────────────────────────────────────────────────
+function VoteArrows({ votes, alive }: { votes: Record<string, string>; alive: string[] }) {
+  const entries = Object.entries(votes).filter(
+    ([v, t]) => alive.includes(v) && alive.includes(t)
+  );
   return (
-    <div
-      className="glass-strong relative overflow-hidden rounded-3xl aspect-square w-full max-w-[680px] mx-auto"
-      style={{
-        background:
-          phase === "night"
-            ? "radial-gradient(circle at 50% 30%, color-mix(in oklab, var(--electric) 8%, transparent), transparent 60%), color-mix(in oklab, var(--background) 70%, black)"
-            : "radial-gradient(circle at 50% 30%, color-mix(in oklab, var(--gold) 6%, transparent), transparent 60%), color-mix(in oklab, var(--surface) 80%, transparent)",
-      }}
-    >
-      {/* concentric rings */}
-      <svg viewBox={`0 0 ${size} ${size}`} className="absolute inset-0 h-full w-full">
-        {[0.45, 0.75, 1].map((s, i) => (
-          <circle key={i} cx={cx} cy={cy} r={R * s} fill="none" stroke="white" strokeOpacity={0.05} />
-        ))}
-
-        {/* trust / suspicion edges from selected (or default global) */}
-        {selected != null &&
-          agents.map((a, j) => {
-            if (j === selected || !a.alive) return null;
-            const me = agents[selected];
-            const trust = me.trust[j] ?? 0.5;
-            const susp = me.suspicion[j] ?? 0;
-            const positive = trust - susp;
-            const color = positive >= 0 ? "246,185,59" : "77,163,255";
-            const alpha = Math.min(0.7, Math.abs(positive) * 0.9 + 0.15);
-            return (
-              <line
-                key={j}
-                x1={positions[selected].x} y1={positions[selected].y}
-                x2={positions[j].x} y2={positions[j].y}
-                stroke={`rgba(${color}, ${alpha})`}
-                strokeWidth={1 + Math.abs(positive) * 2}
-                strokeDasharray={positive < 0 ? "4 4" : undefined}
-              />
-            );
-          })}
-
-        {/* ambient lines */}
-        {selected == null && agents.flatMap((a, i) =>
-          agents.slice(i + 1).map((b, k) => {
-            const j = i + 1 + k;
-            if (!a.alive || !b.alive) return null;
-            return (
-              <line key={`${i}-${j}`} x1={positions[i].x} y1={positions[i].y} x2={positions[j].x} y2={positions[j].y}
-                stroke="white" strokeOpacity={0.04} />
-            );
-          })
-        )}
-      </svg>
-
-      {/* center */}
-      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none">
-        <div className="font-mono text-[10px] tracking-[0.3em] text-muted-foreground">{phase === "night" ? "NIGHT" : "DAY"}</div>
-        <div className="mt-1 font-display text-3xl">{agents.filter(a => a.alive).length} <span className="text-foreground/40">alive</span></div>
-      </div>
-
-      {/* agent nodes */}
-      {agents.map((a, i) => {
-        const { x, y } = positions[i];
-        const isSel = selected === i;
-        const ringColor =
-          a.role === "wolf" ? "var(--electric)" :
-          a.role === "villager" ? "rgba(255,255,255,0.7)" : "var(--gold)";
+    <g opacity={0.65}>
+      <defs>
+        <marker id="arr" markerWidth="7" markerHeight="5" refX="6" refY="2.5" orient="auto">
+          <polygon points="0 0,7 2.5,0 5" fill="#f59e0b"/>
+        </marker>
+      </defs>
+      {entries.map(([voter, target]) => {
+        const from = playerPos(voter), to = playerPos(target);
+        const dx = to.x - from.x, dy = to.y - from.y;
+        const d  = Math.sqrt(dx * dx + dy * dy) || 1;
+        const sx = from.x + (dx / d) * (NODE_R + 1);
+        const sy = from.y + (dy / d) * (NODE_R + 1);
+        const ex = to.x   - (dx / d) * (NODE_R + 8);
+        const ey = to.y   - (dy / d) * (NODE_R + 8);
         return (
-          <button
-            key={a.id}
-            onClick={() => onSelect(isSel ? null : i)}
-            className="absolute -translate-x-1/2 -translate-y-1/2 group"
-            style={{ left: `${(x / size) * 100}%`, top: `${(y / size) * 100}%`, opacity: a.alive ? 1 : 0.35 }}
-          >
-            <div className="relative flex flex-col items-center">
-              <span
-                className="absolute inset-0 rounded-full blur-md transition-all duration-500 group-hover:scale-150"
-                style={{ background: ringColor, opacity: isSel ? 0.5 : 0.18, width: 56, height: 56, top: -6, left: -6 }}
-              />
-              <span
-                className="relative h-11 w-11 rounded-full flex items-center justify-center font-display text-sm transition-all duration-300 group-hover:scale-110"
-                style={{
-                  background: "linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02))",
-                  border: `1px solid ${isSel ? ringColor : "rgba(255,255,255,0.12)"}`,
-                  boxShadow: isSel ? `0 0 24px ${ringColor}` : undefined,
-                  color: a.alive ? "var(--foreground)" : "var(--muted-foreground)",
-                  textDecoration: a.alive ? "none" : "line-through",
-                }}
-              >
-                {a.name[0]}
-              </span>
-              <span className="mt-2 font-mono text-[10px] tracking-[0.2em] text-foreground/80">{a.name.toUpperCase()}</span>
-            </div>
-          </button>
+          <line key={`${voter}-${target}`}
+            x1={sx} y1={sy} x2={ex} y2={ey}
+            stroke="#f59e0b" strokeWidth={1.5}
+            markerEnd="url(#arr)" strokeDasharray="4 3"
+          />
         );
       })}
-    </div>
+    </g>
   );
 }
 
-// ---------------- Side panel ----------------
+// ─────────────────────────────────────────────────────────────────────────────
+//  Trust lines (shown for selected agent in Research Mode)
+// ─────────────────────────────────────────────────────────────────────────────
+function TrustLines({ selected, gs }: { selected: string; gs: GameSnapshot }) {
+  const scores = gs.deceptionScores[selected] ?? {};
+  return (
+    <g>
+      {Object.entries(scores).map(([target, score]) => {
+        if (!gs.alivePlayers.includes(target)) return null;
+        const from = playerPos(selected), to = playerPos(target);
+        const c = suspicionColor(score as number);
+        return (
+          <line key={target}
+            x1={from.x} y1={from.y} x2={to.x} y2={to.y}
+            stroke={c} strokeWidth={1.5} opacity={0.5} strokeDasharray="3 4"
+          />
+        );
+      })}
+    </g>
+  );
+}
 
-function SidePanel({ agent, agents, events }: { agent: Agent | null; agents: Agent[]; events: Event[] }) {
-  if (!agent) {
+// ─────────────────────────────────────────────────────────────────────────────
+//  Inspector panel
+// ─────────────────────────────────────────────────────────────────────────────
+function InspectorPanel({
+  selected, gs, mode, onClose, events, currentIndex,
+}: {
+  selected: string | null;
+  gs: GameSnapshot;
+  mode: "watch" | "research";
+  onClose: () => void;
+  events: ReplayEvent[];
+  currentIndex: number;
+}) {
+  if (!selected) {
+    // Event feed
+    const recent = events.slice(0, Math.max(0, currentIndex + 1)).reverse().slice(0, 18);
     return (
-      <aside className="glass-strong rounded-3xl p-6 h-fit lg:sticky lg:top-28">
-        <div className="font-mono text-[10px] tracking-[0.3em] text-muted-foreground">ACTIVITY</div>
-        <h3 className="mt-2 font-display text-xl">Event log</h3>
-        <p className="mt-2 text-xs text-muted-foreground">Click any agent to inspect their state.</p>
-        <ul className="mt-5 space-y-3 max-h-[520px] overflow-auto pr-1">
-          {events.slice().reverse().map((e, i) => (
-            <li key={i} className="text-sm leading-snug">
-              <div className="font-mono text-[10px] tracking-[0.2em] text-gold/70">
-                R{e.round} · {e.phase.toUpperCase()}
-              </div>
-              <div className="mt-0.5 text-foreground/85">{e.text}</div>
-            </li>
+      <div className="flex flex-col h-full">
+        <p className="text-xs text-slate-500 uppercase tracking-widest mb-3 font-medium">Event Log</p>
+        <div className="flex-1 overflow-y-auto space-y-1.5 pr-1">
+          {recent.length === 0 && (
+            <p className="text-slate-600 text-xs italic">Replay hasn't started yet.</p>
+          )}
+          {recent.map((ev, i) => (
+            <div key={ev.id}
+              className={`rounded px-2.5 py-1.5 text-xs leading-snug ${
+                i === 0 ? "bg-slate-800/80 border border-slate-700" : "bg-slate-900/50"
+              }`}
+            >
+              <span className="text-slate-400 mr-1.5">[R{ev.round}]</span>
+              <span className={
+                ev.wolfEventType === "debate"
+                  ? "text-sky-300"
+                  : ev.wolfEventType === "deception_analysis"
+                  ? (ev.isDeceptive ? "text-red-400" : "text-green-400")
+                  : ev.wolfEventType === "exile" || ev.wolfEventType === "resolve_night"
+                  ? "text-amber-400"
+                  : "text-slate-300"
+              }>
+                {ev.description.length > 72 ? ev.description.slice(0, 70) + "…" : ev.description}
+              </span>
+            </div>
           ))}
-        </ul>
-      </aside>
+        </div>
+      </div>
     );
   }
 
-  const ringColor =
-    agent.role === "wolf" ? "var(--electric)" :
-    agent.role === "villager" ? "rgba(255,255,255,0.7)" : "var(--gold)";
+  const player = gs.players.find(p => p.name === selected);
+  if (!player) return null;
+  const roleColor = ROLE_COLORS[player.role];
+  const alive = player.status === "alive";
 
   return (
-    <aside className="glass-strong rounded-3xl p-6 h-fit lg:sticky lg:top-28 animate-fade-up">
-      <div className="flex items-start gap-4">
-        <span
-          className="h-14 w-14 rounded-full grid place-items-center font-display text-lg"
-          style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${ringColor}`, boxShadow: `0 0 24px ${ringColor}` }}
-        >
-          {agent.name[0]}
-        </span>
+    <div className="flex flex-col gap-4">
+      <div className="flex items-start justify-between">
         <div>
-          <div className="font-mono text-[10px] tracking-[0.3em] text-muted-foreground">AGENT</div>
-          <h3 className="font-display text-2xl">{agent.name}</h3>
-          <div className="mt-1 inline-flex items-center gap-2 rounded-full px-2.5 py-0.5 text-[10px] uppercase tracking-[0.2em]"
-            style={{ background: "color-mix(in oklab, white 5%, transparent)", color: ringColor }}>
-            {agent.role} {!agent.alive && "· eliminated"}
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full" style={{ background: mode === "research" ? roleColor : "#64748b" }}/>
+            <span className="text-white font-bold text-lg">{player.name}</span>
+            {!alive && <span className="text-xs bg-red-900/60 text-red-400 rounded px-1.5 py-0.5">Eliminated</span>}
           </div>
+          {mode === "research" && (
+            <p className="text-xs mt-0.5" style={{ color: roleColor }}>{player.role}</p>
+          )}
         </div>
+        <button onClick={onClose} className="text-slate-500 hover:text-slate-300 text-lg leading-none">×</button>
       </div>
 
-      <Bar label="Trust radiated" value={avg(Object.values(agent.trust))} color="gold" />
-      <Bar label="Suspicion radiated" value={avg(Object.values(agent.suspicion))} color="electric" />
+      {mode === "research" && alive && (
+        <>
+          <div>
+            <p className="text-xs text-slate-500 uppercase tracking-wider mb-1.5">Suspicion Score</p>
+            <div className="flex items-center gap-2">
+              <div className="flex-1 h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all"
+                  style={{
+                    width: `${player.suspicionScore * 100}%`,
+                    background: suspicionColor(player.suspicionScore),
+                  }}
+                />
+              </div>
+              <span className="text-xs text-slate-300 w-9 text-right">
+                {(player.suspicionScore * 100).toFixed(0)}%
+              </span>
+            </div>
+          </div>
 
-      <div className="mt-6">
-        <div className="font-mono text-[10px] tracking-[0.3em] text-muted-foreground mb-3">RELATIONSHIPS</div>
-        <ul className="space-y-2">
-          {agents.filter(a => a.id !== agent.id).map(a => {
-            const t = agent.trust[a.id] ?? 0.5;
-            const s = agent.suspicion[a.id] ?? 0;
-            return (
-              <li key={a.id} className="flex items-center gap-3 text-xs">
-                <span className="w-12 text-foreground/80">{a.name}</span>
-                <div className="flex-1 h-1 rounded-full bg-white/5 overflow-hidden flex">
-                  <span style={{ width: `${t * 100}%`, background: "var(--gold)" }} />
-                </div>
-                <div className="flex-1 h-1 rounded-full bg-white/5 overflow-hidden flex">
-                  <span style={{ width: `${s * 100}%`, background: "var(--electric)" }} />
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      </div>
-    </aside>
+          {Object.keys(gs.deceptionScores[player.name] ?? {}).length > 0 && (
+            <div>
+              <p className="text-xs text-slate-500 uppercase tracking-wider mb-1.5">
+                {player.name}'s suspicion of others
+              </p>
+              <div className="space-y-1">
+                {Object.entries(gs.deceptionScores[player.name] ?? {})
+                  .filter(([t]) => gs.alivePlayers.includes(t))
+                  .sort(([, a], [, b]) => (b as number) - (a as number))
+                  .map(([target, score]) => (
+                    <div key={target} className="flex items-center gap-2">
+                      <span className="text-xs text-slate-400 w-14">{target}</span>
+                      <div className="flex-1 h-1 rounded-full bg-slate-800 overflow-hidden">
+                        <div
+                          className="h-full rounded-full"
+                          style={{
+                            width: `${(score as number) * 100}%`,
+                            background: suspicionColor(score as number),
+                          }}
+                        />
+                      </div>
+                      <span className="text-xs text-slate-500 w-7 text-right">
+                        {((score as number) * 100).toFixed(0)}%
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+
+          {gs.votes[player.name] && (
+            <div>
+              <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">Vote</p>
+              <p className="text-sm text-amber-300">Voted to exile <strong>{gs.votes[player.name]}</strong></p>
+            </div>
+          )}
+        </>
+      )}
+
+      {mode === "watch" && (
+        <div>
+          <p className="text-xs text-slate-500 uppercase tracking-wider mb-1.5">Status</p>
+          <p className="text-sm text-slate-300">{alive ? "Active" : "Eliminated"}</p>
+          {gs.votes[player.name] && (
+            <p className="text-sm text-amber-300 mt-1">Voted to exile <strong>{gs.votes[player.name]}</strong></p>
+          )}
+        </div>
+      )}
+
+      {/* Last statement */}
+      {(() => {
+        const lastDebate = [...gs.debateLog].reverse().find(([s]) => s === player.name);
+        if (!lastDebate) return null;
+        return (
+          <div>
+            <p className="text-xs text-slate-500 uppercase tracking-wider mb-1.5">Last Statement</p>
+            <p className="text-xs text-slate-300 italic leading-relaxed">
+              "{lastDebate[1].length > 140 ? lastDebate[1].slice(0, 138) + "…" : lastDebate[1]}"
+            </p>
+          </div>
+        );
+      })()}
+    </div>
   );
 }
 
-function Bar({ label, value, color }: { label: string; value: number; color: "gold" | "electric" }) {
-  const c = color === "gold" ? "var(--gold)" : "var(--electric)";
+// ─────────────────────────────────────────────────────────────────────────────
+//  Control bar
+// ─────────────────────────────────────────────────────────────────────────────
+interface ControlBarProps {
+  status: string; speed: number;
+  onPlay: () => void; onPause: () => void; onRestart: () => void;
+  onPrev: () => void; onNext: () => void;
+  onSpeed: (s: 0.5 | 1 | 2) => void;
+}
+function ControlBar({ status, speed, onPlay, onPause, onRestart, onPrev, onNext, onSpeed }: ControlBarProps) {
+  const isPlaying = status === "playing";
   return (
-    <div className="mt-5">
-      <div className="flex items-center justify-between font-mono text-[10px] tracking-[0.2em] text-muted-foreground">
-        <span>{label}</span><span>{(value * 100).toFixed(0)}%</span>
-      </div>
-      <div className="mt-2 h-1.5 rounded-full bg-white/5 overflow-hidden">
-        <div className="h-full rounded-full transition-all duration-700" style={{ width: `${value * 100}%`, background: c, boxShadow: `0 0 12px ${c}` }} />
+    <div className="flex items-center gap-3 flex-wrap">
+      <button onClick={onRestart} title="Restart"
+        className="w-8 h-8 flex items-center justify-center rounded text-slate-400 hover:text-white hover:bg-slate-700 transition-colors text-sm"
+      >⏮</button>
+      <button onClick={onPrev} title="Previous"
+        className="w-8 h-8 flex items-center justify-center rounded text-slate-400 hover:text-white hover:bg-slate-700 transition-colors text-sm"
+      >◀</button>
+      <button
+        onClick={isPlaying ? onPause : onPlay}
+        className="w-9 h-9 flex items-center justify-center rounded-full text-slate-900 font-bold text-base transition-all"
+        style={{ background: isPlaying ? "#f59e0b" : "#3b82f6" }}
+      >
+        {isPlaying ? "⏸" : "▶"}
+      </button>
+      <button onClick={onNext} title="Next"
+        className="w-8 h-8 flex items-center justify-center rounded text-slate-400 hover:text-white hover:bg-slate-700 transition-colors text-sm"
+      >▶</button>
+
+      <div className="flex items-center gap-1 ml-2">
+        {([0.5, 1, 2] as const).map(s => (
+          <button key={s} onClick={() => onSpeed(s)}
+            className={`px-2 py-0.5 text-xs rounded transition-colors ${
+              speed === s
+                ? "bg-blue-600 text-white"
+                : "text-slate-400 hover:text-white hover:bg-slate-700"
+            }`}
+          >
+            {s}×
+          </button>
+        ))}
       </div>
     </div>
   );
 }
-function avg(xs: number[]) { return xs.reduce((a, b) => a + b, 0) / Math.max(1, xs.length); }
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Timeline bar
+// ─────────────────────────────────────────────────────────────────────────────
+function TimelineBar({
+  events, currentIndex, onScrub,
+}: {
+  events: ReplayEvent[]; currentIndex: number; onScrub: (i: number) => void;
+}) {
+  const total = events.length;
+  const pct   = total > 1 ? (Math.max(0, currentIndex) / (total - 1)) * 100 : 0;
+  const trackRef = useRef<HTMLDivElement>(null);
+
+  const handleClick = (e: React.MouseEvent) => {
+    const rect = trackRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const frac = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    onScrub(Math.round(frac * (total - 1)));
+  };
+
+  return (
+    <div className="relative h-8 flex items-center select-none" ref={trackRef} onClick={handleClick}
+      style={{ cursor: "pointer" }}
+    >
+      {/* Track */}
+      <div className="absolute inset-x-0 h-1 rounded-full bg-slate-800"/>
+      {/* Fill */}
+      <div className="absolute left-0 h-1 rounded-full bg-blue-600 transition-all"
+        style={{ width: `${pct}%` }}
+      />
+      {/* Key event markers */}
+      {events.map((ev, i) => ev.isKeyEvent && (
+        <div key={ev.id}
+          className="absolute w-1.5 h-1.5 rounded-full -translate-x-1/2 translate-y-0 cursor-pointer"
+          style={{
+            left: `${(i / (total - 1)) * 100}%`,
+            background: ev.wolfEventType === "exile" || ev.wolfEventType === "resolve_night"
+              ? "#f59e0b"
+              : ev.wolfEventType === "game_end"
+              ? "#ef4444"
+              : "#64748b",
+          }}
+          onClick={e => { e.stopPropagation(); onScrub(i); }}
+          title={ev.description.slice(0, 50)}
+        />
+      ))}
+      {/* Handle */}
+      {currentIndex >= 0 && (
+        <div className="absolute w-3.5 h-3.5 rounded-full bg-white shadow-lg -translate-x-1/2 z-10 pointer-events-none"
+          style={{ left: `${pct}%`, top: "50%", transform: "translate(-50%,-50%)" }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Game board (SVG canvas)
+// ─────────────────────────────────────────────────────────────────────────────
+function GameBoard({
+  gs, mode, selected, speakingAgent, speakingMsg, onSelectAgent,
+}: {
+  gs: GameSnapshot; mode: "watch" | "research";
+  selected: string | null; speakingAgent: string | null; speakingMsg: string | null;
+  onSelectAgent: (name: string) => void;
+}) {
+  const showVotes = gs.phase === "vote" && Object.keys(gs.votes).length > 0;
+
+  return (
+    <svg
+      viewBox="0 0 560 530"
+      style={{ width: "100%", height: "100%", overflow: "visible" }}
+    >
+      {/* Subtle grid circle */}
+      <circle cx={CX} cy={CY} r={R + NODE_R + 12}
+        fill="none" stroke="rgba(51,65,85,0.35)" strokeWidth={1} strokeDasharray="2 4"
+      />
+      <circle cx={CX} cy={CY} r={6} fill="rgba(51,65,85,0.6)"/>
+
+      {/* Trust lines for selected agent (research mode) */}
+      {mode === "research" && selected && (
+        <TrustLines selected={selected} gs={gs}/>
+      )}
+
+      {/* Vote arrows */}
+      {showVotes && <VoteArrows votes={gs.votes} alive={gs.alivePlayers}/>}
+
+      {/* Agent nodes */}
+      {gs.players.map(player => (
+        <AgentNode
+          key={player.name}
+          player={{ ...player, isSpeaking: player.name === speakingAgent }}
+          pos={playerPos(player.name)}
+          mode={mode}
+          selected={selected === player.name}
+          onClick={() => onSelectAgent(player.name)}
+        />
+      ))}
+
+      {/* Phase label in center */}
+      <text x={CX} y={CY - 16} textAnchor="middle" fontSize="11"
+        fill="rgba(148,163,184,0.7)" letterSpacing="0.05em"
+      >
+        {PHASE_LABEL[gs.phase] ?? gs.phase}
+      </text>
+      <text x={CX} y={CY + 6} textAnchor="middle" fontSize="14" fontWeight="700"
+        fill={gs.round === 0 ? "rgba(100,116,139,0.8)" : "rgba(226,232,240,0.9)"}
+      >
+        {gs.winner ? (gs.winner === "Werewolves" ? "🐺 Wolves Win" : "✅ Villagers Win") :
+          gs.round === 0 ? "Ready" : `Round ${gs.round}`}
+      </text>
+      <text x={CX} y={CY + 22} textAnchor="middle" fontSize="10"
+        fill="rgba(100,116,139,0.7)"
+      >
+        {gs.alivePlayers.length} alive
+      </text>
+
+      {/* Speaking bubble */}
+      {speakingAgent && speakingMsg && (
+        <SpeakingBubble agent={speakingAgent} msg={speakingMsg}/>
+      )}
+    </svg>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Experience Page
+// ─────────────────────────────────────────────────────────────────────────────
+function ExperiencePage() {
+  const events = useMemo(() => parseWolfEvents(WOLF_DEMO_EVENTS), []);
+  const { state, play, pause, restart, prev, next, scrubTo, setSpeed } = useReplay(events);
+  const [mode, setMode]     = useState<"watch" | "research">("watch");
+  const [selected, setSelected] = useState<string | null>(null);
+
+  const gs = state.gameState ?? INITIAL_GS;
+  const isIdle = state.status === "idle";
+
+  const handleSelectAgent = (name: string) => {
+    setSelected(prev => prev === name ? null : name);
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col pt-[68px]">
+
+      {/* ── Top bar ── */}
+      <div className="flex items-center justify-between px-5 py-3 border-b border-slate-800/60">
+        <div className="flex items-center gap-3">
+          <a href="/" className="text-slate-500 hover:text-slate-300 text-xs transition-colors">← Back</a>
+          <span className="text-slate-700">|</span>
+          <span className="text-sm font-semibold text-slate-100 tracking-wide">WOLF Replay</span>
+          {!isIdle && (
+            <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-400">
+              Demo Run · 2 Rounds
+            </span>
+          )}
+        </div>
+
+        {/* Mode toggle */}
+        <div className="flex items-center gap-1 bg-slate-900 rounded-lg p-0.5 border border-slate-800">
+          {(["watch", "research"] as const).map(m => (
+            <button key={m} onClick={() => setMode(m)}
+              className={`px-3 py-1 text-xs rounded-md font-medium transition-all ${
+                mode === m
+                  ? "bg-slate-700 text-white"
+                  : "text-slate-500 hover:text-slate-300"
+              }`}
+            >
+              {m === "watch" ? "Watch" : "Research"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Main area ── */}
+      <div className="flex flex-1 min-h-0 overflow-hidden" style={{ minHeight: 0 }}>
+
+        {/* Game board */}
+        <div className="relative flex-1 flex items-center justify-center p-4 min-w-0">
+          <div style={{ width: "100%", maxWidth: "560px", aspectRatio: "560/530" }}>
+            <GameBoard
+              gs={gs} mode={mode}
+              selected={selected}
+              speakingAgent={state.speakingAgent}
+              speakingMsg={state.speakingMsg}
+              onSelectAgent={handleSelectAgent}
+            />
+          </div>
+
+          {/* Idle overlay: Start button */}
+          {isIdle && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/75 backdrop-blur-sm">
+              <div className="text-center space-y-4">
+                <p className="text-slate-400 text-sm">8 AI agents · 2 Werewolves · Real deception analysis</p>
+                <button onClick={play}
+                  className="px-8 py-3 rounded-xl text-white font-bold text-lg shadow-lg transition-all hover:scale-105 active:scale-95"
+                  style={{ background: "linear-gradient(135deg, #3b82f6, #6366f1)" }}
+                >
+                  ▶ Start Replay
+                </button>
+                <p className="text-slate-600 text-xs">Click any agent to inspect · Toggle Research mode for deception scores</p>
+              </div>
+            </div>
+          )}
+
+          {/* Winner overlay */}
+          {gs.winner && state.status !== "playing" && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="text-center px-10 py-8 rounded-2xl border border-slate-700/50 bg-slate-950/80 backdrop-blur-sm">
+                <div className="text-4xl mb-2">{gs.winner === "Werewolves" ? "🐺" : "🏡"}</div>
+                <div className="text-2xl font-bold text-white">{gs.winner} Win</div>
+                <div className="text-slate-400 text-sm mt-1">
+                  {gs.winner === "Werewolves"
+                    ? "Wolves outnumbered the villagers"
+                    : "All werewolves have been exiled"}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Inspector / event feed panel */}
+        <div className="w-72 flex-shrink-0 border-l border-slate-800/60 bg-slate-950/50 overflow-y-auto p-4">
+          <InspectorPanel
+            selected={selected}
+            gs={gs}
+            mode={mode}
+            onClose={() => setSelected(null)}
+            events={events}
+            currentIndex={state.currentIndex}
+          />
+        </div>
+      </div>
+
+      {/* ── Event description strip ── */}
+      {state.currentEvent && (
+        <div className="px-5 py-2 bg-slate-900/60 border-t border-slate-800/40 text-xs text-slate-400 leading-snug min-h-[32px]">
+          <span className="text-slate-600 mr-2">
+            R{state.currentEvent.round} · {state.currentEvent.phase} ·
+          </span>
+          <span className={
+            state.currentEvent.wolfEventType === "deception_analysis" && state.currentEvent.isDeceptive
+              ? "text-red-400"
+              : state.currentEvent.wolfEventType === "exile" || state.currentEvent.wolfEventType === "resolve_night"
+              ? "text-amber-300"
+              : state.currentEvent.wolfEventType === "game_end"
+              ? "text-green-400"
+              : "text-slate-300"
+          }>
+            {state.currentEvent.description}
+          </span>
+        </div>
+      )}
+
+      {/* ── Controls + Timeline ── */}
+      <div className="px-5 py-3 border-t border-slate-800/60 bg-slate-950 space-y-2">
+        <div className="flex items-center justify-between gap-4">
+          <ControlBar
+            status={state.status} speed={state.speed}
+            onPlay={play} onPause={pause} onRestart={restart}
+            onPrev={prev} onNext={next} onSpeed={setSpeed}
+          />
+          <span className="text-xs text-slate-600 tabular-nums">
+            {state.currentIndex < 0 ? 0 : state.currentIndex + 1} / {events.length}
+          </span>
+        </div>
+        <TimelineBar
+          events={events}
+          currentIndex={state.currentIndex}
+          onScrub={scrubTo}
+        />
+      </div>
+
+    </div>
+  );
+}
