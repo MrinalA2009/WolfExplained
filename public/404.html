@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>WOLF</title>
+    <!--
+      Single-page app redirect for GitHub Pages (rafgraph/spa-github-pages technique).
+      segmentCount = 1  →  keeps "/WolfExplained" as the first path segment.
+
+      Transforms:  /WolfExplained/research
+               →   /WolfExplained/?/research
+      then index.html restores it back via history.replaceState before React boots.
+    -->
+    <script>
+      var segmentCount = 1;
+      var l = window.location;
+      l.replace(
+        l.protocol + '//' + l.hostname + (l.port ? ':' + l.port : '') +
+        l.pathname.split('/').slice(0, 1 + segmentCount).join('/') + '/?/' +
+        l.pathname.slice(1).split('/').slice(segmentCount).join('/').replace(/&/g, '~and~') +
+        (l.search ? '&' + l.search.slice(1).replace(/&/g, '~and~') : '') +
+        l.hash
+      );
+    </script>
+  </head>
+  <body></body>
+</html>

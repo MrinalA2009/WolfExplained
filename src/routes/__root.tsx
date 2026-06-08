@@ -91,11 +91,17 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   errorComponent: ErrorComponent,
 });
 
+// Restores the URL path after the GitHub Pages 404.html SPA redirect
+// (encodes paths as ?/deep/path to survive GitHub's 404 handler).
+const spaRedirectRestore = `(function(l){if(l.search[1]==='/'){var d=l.search.slice(1).split('&').map(function(s){return s.replace(/~and~/g,'&')}).join('?');window.history.replaceState(null,null,l.pathname.slice(0,-1)+d+l.hash)}}(window.location))`;
+
 function RootShell({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className="dark">
       <head>
         <HeadContent />
+        {/* Must run before React hydration to fix URL before router reads it */}
+        <script dangerouslySetInnerHTML={{ __html: spaRedirectRestore }} />
       </head>
       <body>
         {children}
