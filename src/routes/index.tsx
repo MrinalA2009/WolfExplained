@@ -96,8 +96,17 @@ function Hero() {
               Experience WOLF
               <span className="opacity-75">→</span>
             </MagneticButton>
+            <MagneticButton
+              href="https://arxiv.org/abs/2512.09187"
+              variant="ghost"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Read the paper
+              <span className="opacity-75">↗</span>
+            </MagneticButton>
             <MagneticButton href="/research" variant="ghost">
-              Read the research
+              Understand the research
             </MagneticButton>
           </div>
         </Reveal>

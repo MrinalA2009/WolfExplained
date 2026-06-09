@@ -13,7 +13,7 @@
  *  - check_winner_* → sets winner
  */
 
-import type { WolfEvent, ReplayEvent, GameSnapshot, PlayerState, Role, FrontendEventType } from "./wolfTypes";
+import type { WolfEvent, ReplayEvent, GameSnapshot, PlayerState, Role, FrontendEventType, ObserverAnalysis, SelfAnalysis } from "./wolfTypes";
 import { PLAYERS, ROLE_COLORS } from "./wolfTypes";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -166,6 +166,8 @@ export function parseWolfEvents(rawEvents: WolfEvent[]): ReplayEvent[] {
             scores[obs][speaker] = clamp(0.7 * (analysis.suspicion_level ?? avgSus) + 0.3 * hist);
           }
         }
+        // Set current message to the statement so it's accessible on this event
+        currentMsg = (d.statement as string) ?? null;
         break;
       }
 
@@ -270,10 +272,23 @@ export function parseWolfEvents(rawEvents: WolfEvent[]): ReplayEvent[] {
     };
 
     // ── Self analysis from deception_analysis event ────────────────────────
-    const selfAnalysis = d.self_analysis as { is_deceptive?: boolean; deception_type?: string } | undefined;
+    const selfAnalysis = d.self_analysis as { is_deceptive?: boolean; deception_type?: string; confidence?: number } | undefined;
     const isDeceptive  = selfAnalysis?.is_deceptive ?? null;
     const deceptionType = selfAnalysis?.deception_type ?? null;
     const avgSus       = (d.average_suspicion as number | undefined) ?? null;
+
+    const selfAnalysisData: SelfAnalysis | null = ev.event === "deception_analysis" && selfAnalysis
+      ? {
+          is_deceptive:   selfAnalysis.is_deceptive ?? false,
+          deception_type: selfAnalysis.deception_type ?? "none",
+          confidence:     selfAnalysis.confidence ?? 0,
+        }
+      : null;
+
+    const observerAnalyses: Record<string, ObserverAnalysis> | null =
+      ev.event === "deception_analysis"
+        ? (d.other_analyses as Record<string, ObserverAnalysis>) ?? null
+        : null;
 
     result.push({
       id:            `${ev.round}-${ev.step}-${ev.event}`,
@@ -291,6 +306,8 @@ export function parseWolfEvents(rawEvents: WolfEvent[]): ReplayEvent[] {
       isKeyEvent:    isKeyEvent(ev.event),
       durationMs:    durationMs(ev.event, ev.phase),
       gameState:     snapshot,
+      selfAnalysisData,
+      observerAnalyses,
     });
   }
 

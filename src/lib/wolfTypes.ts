@@ -48,6 +48,18 @@ export interface GameSnapshot {
   announcement:    string | null;
 }
 
+// ─── Scratchpad types (from deception_analysis events) ───────────────────────
+export interface ObserverAnalysis {
+  is_deceptive: boolean;
+  suspicion_level: number;
+  reasoning: string;
+}
+export interface SelfAnalysis {
+  is_deceptive: boolean;
+  deception_type: string;
+  confidence: number;
+}
+
 // ─── Frontend replay event ─────────────────────────────────────────────────────
 export type FrontendEventType =
   | "game_start"     | "phase_change"    | "night_action"
@@ -71,6 +83,8 @@ export interface ReplayEvent {
   isKeyEvent:      boolean;            // show as marker on timeline
   durationMs:      number;             // display duration at 1× speed
   gameState:       GameSnapshot;       // full state snapshot at this moment
+  selfAnalysisData:  SelfAnalysis | null;
+  observerAnalyses:  Record<string, ObserverAnalysis> | null;
 }
 
 // ─── Initial game setup (fixed for all WOLF runs) ─────────────────────────────

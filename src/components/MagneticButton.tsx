@@ -6,12 +6,16 @@ export function MagneticButton({
   onClick,
   variant = "primary",
   className = "",
+  target,
+  rel,
 }: {
   children: ReactNode;
   href?: string;
   onClick?: () => void;
   variant?: "primary" | "ghost";
   className?: string;
+  target?: string;
+  rel?: string;
 }) {
   const base =
     "btn-magnetic relative inline-flex items-center gap-2.5 rounded-full px-6 py-3 text-sm font-medium tracking-wide overflow-hidden group";
@@ -57,7 +61,7 @@ export function MagneticButton({
 
   if (href) {
     return (
-      <a href={href} className={`${base} ${styles} ${className}`} {...handlers}>
+      <a href={href} target={target} rel={rel} className={`${base} ${styles} ${className}`} {...handlers}>
         {content}
       </a>
     );

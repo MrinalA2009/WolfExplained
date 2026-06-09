@@ -4,7 +4,7 @@ import { WOLF_DEMO_EVENTS } from "../data/wolfDemoGame";
 import { parseWolfEvents } from "../lib/wolfParser";
 import { useReplay } from "../lib/useReplay";
 import { ROLE_COLORS, PLAYERS } from "../lib/wolfTypes";
-import type { PlayerState, ReplayEvent, GameSnapshot } from "../lib/wolfTypes";
+import type { PlayerState, ReplayEvent, GameSnapshot, ObserverAnalysis } from "../lib/wolfTypes";
 
 export const Route = createFileRoute("/experience")({
   head: () => ({
@@ -286,7 +286,7 @@ function InspectorPanel({
                   ? "text-amber-400"
                   : "text-slate-300"
               }>
-                {ev.description.length > 72 ? ev.description.slice(0, 70) + "…" : ev.description}
+                {ev.description}
               </span>
             </div>
           ))}
@@ -385,7 +385,7 @@ function InspectorPanel({
         </div>
       )}
 
-      {/* Last statement */}
+      {/* Last statement — full text, no truncation */}
       {(() => {
         const lastDebate = [...gs.debateLog].reverse().find(([s]) => s === player.name);
         if (!lastDebate) return null;
@@ -393,11 +393,138 @@ function InspectorPanel({
           <div>
             <p className="text-xs text-slate-500 uppercase tracking-wider mb-1.5">Last Statement</p>
             <p className="text-xs text-slate-300 italic leading-relaxed">
-              "{lastDebate[1].length > 140 ? lastDebate[1].slice(0, 138) + "…" : lastDebate[1]}"
+              "{lastDebate[1]}"
             </p>
           </div>
         );
       })()}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Analysis panel — full statement + observer scratchpad
+// ─────────────────────────────────────────────────────────────────────────────
+function AnalysisPanel({
+  events, currentIndex,
+}: {
+  events: ReplayEvent[];
+  currentIndex: number;
+}) {
+  const [tab, setTab] = useState<"statement" | "scratchpad">("statement");
+
+  // For a debate event, the paired deception_analysis is always the event just before it
+  const cur  = currentIndex >= 0 ? events[currentIndex] : null;
+  const prev = currentIndex > 0  ? events[currentIndex - 1] : null;
+
+  const analysisEv =
+    cur?.wolfEventType === "deception_analysis" ? cur :
+    cur?.wolfEventType === "debate" && prev?.wolfEventType === "deception_analysis" && prev.actor === cur.actor ? prev :
+    null;
+
+  const statementText = cur?.message ?? analysisEv?.message ?? null;
+  const actor         = cur?.actor ?? null;
+
+  if (!actor || !statementText) return null;
+
+  const selfA    = analysisEv?.selfAnalysisData ?? null;
+  const observers: Record<string, ObserverAnalysis> = analysisEv?.observerAnalyses ?? {};
+  const hasAnalysis = Object.keys(observers).length > 0;
+
+  return (
+    <div className="border-t border-slate-800/60 bg-slate-900/40">
+      {/* Tab bar */}
+      <div className="flex items-center gap-0 border-b border-slate-800/60 px-4 pt-2">
+        {(["statement", "scratchpad"] as const).map(t => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`px-3 py-1.5 text-[11px] font-medium tracking-wide rounded-t transition-colors border-b-2 -mb-px ${
+              tab === t
+                ? "text-white border-blue-500"
+                : "text-slate-500 border-transparent hover:text-slate-300"
+            }`}
+          >
+            {t === "statement" ? "Full Statement" : "Observer Scratchpad"}
+            {t === "scratchpad" && !hasAnalysis && (
+              <span className="ml-1.5 text-[10px] text-slate-600">(n/a)</span>
+            )}
+          </button>
+        ))}
+        <div className="ml-auto flex items-center gap-2 pb-1.5">
+          {selfA && (
+            <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+              selfA.is_deceptive
+                ? "bg-red-900/50 text-red-300 border border-red-800/60"
+                : "bg-green-900/50 text-green-300 border border-green-800/60"
+            }`}>
+              {actor}: {selfA.is_deceptive ? `⚠ ${selfA.deception_type}` : "✓ Truthful"}
+              <span className="opacity-60 ml-1">({(selfA.confidence * 100).toFixed(0)}% conf)</span>
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="overflow-y-auto" style={{ maxHeight: "190px" }}>
+        {tab === "statement" && (
+          <div className="px-5 py-3">
+            <p className="text-[11px] text-slate-500 uppercase tracking-widest mb-2 font-medium">
+              {actor} · R{cur?.round} · {cur?.phase}
+            </p>
+            <p className="text-sm text-slate-200 leading-relaxed">
+              "{statementText}"
+            </p>
+          </div>
+        )}
+
+        {tab === "scratchpad" && (
+          <div className="px-5 py-3">
+            {!hasAnalysis ? (
+              <p className="text-xs text-slate-600 italic">
+                No observer analysis available for this event.
+              </p>
+            ) : (
+              <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))" }}>
+                {Object.entries(observers)
+                  .sort(([, a], [, b]) => b.suspicion_level - a.suspicion_level)
+                  .map(([obs, analysis]) => (
+                    <div
+                      key={obs}
+                      className={`rounded-lg border px-3 py-2 ${
+                        analysis.is_deceptive
+                          ? "bg-red-950/30 border-red-900/50"
+                          : "bg-slate-900/60 border-slate-800/60"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-semibold text-slate-200">{obs}</span>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="text-[10px] font-mono tabular-nums"
+                            style={{ color: suspicionColor(analysis.suspicion_level) }}
+                          >
+                            {(analysis.suspicion_level * 100).toFixed(0)}% sus
+                          </span>
+                          <span className={`text-[9.5px] px-1.5 py-0.5 rounded ${
+                            analysis.is_deceptive
+                              ? "bg-red-900/60 text-red-400"
+                              : "bg-slate-800 text-slate-400"
+                          }`}>
+                            {analysis.is_deceptive ? "⚠ deceptive" : "✓ truthful"}
+                          </span>
+                        </div>
+                      </div>
+                      <p className="text-[11px] text-slate-400 leading-snug">
+                        {analysis.reasoning}
+                      </p>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -574,13 +701,102 @@ function GameBoard({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  Feature guide strip
+// ─────────────────────────────────────────────────────────────────────────────
+const FEATURES = [
+  {
+    icon: "◎",
+    label: "Click any agent",
+    desc: "Opens the inspector: suspicion score, vote cast, and their last statement in full.",
+    color: "#3b82f6",
+  },
+  {
+    icon: "⊞",
+    label: "Research mode",
+    desc: "Reveals secret roles and draws color-coded suspicion arcs + trust lines between agents.",
+    color: "#a855f7",
+  },
+  {
+    icon: "◈",
+    label: "Full Statement",
+    desc: "When an agent speaks, their complete untruncated statement appears in the panel below.",
+    color: "#22c55e",
+  },
+  {
+    icon: "⟡",
+    label: "Observer Scratchpad",
+    desc: "Switch to the Scratchpad tab to see every other agent's private reasoning about the speaker.",
+    color: "#f59e0b",
+  },
+  {
+    icon: "→",
+    label: "Vote arrows",
+    desc: "During the voting phase, gold arrows show in real time who each agent suspects.",
+    color: "#f59e0b",
+  },
+  {
+    icon: "⏱",
+    label: "Timeline",
+    desc: "Click anywhere on the bar to jump to that moment. Amber dots = eliminations, red = game end.",
+    color: "#64748b",
+  },
+  {
+    icon: "◀▶",
+    label: "Step controls",
+    desc: "Use ◀ and ▶ to step through individual events one at a time at your own pace.",
+    color: "#64748b",
+  },
+] as const;
+
+function FeatureGuide({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="border-b border-slate-800/60 bg-slate-900/50 backdrop-blur-sm">
+      <div className="px-5 pt-3 pb-3">
+        <div className="flex items-center justify-between mb-2.5">
+          <p className="font-mono text-[9.5px] tracking-[0.28em] text-slate-500 uppercase">
+            What you can explore in this demo
+          </p>
+          <button
+            onClick={onClose}
+            className="text-[10px] text-slate-600 hover:text-slate-400 transition-colors px-2 py-0.5 rounded hover:bg-slate-800"
+          >
+            Got it ✓
+          </button>
+        </div>
+        <div className="flex gap-2.5 overflow-x-auto pb-1 scrollbar-none" style={{ scrollbarWidth: "none" }}>
+          {FEATURES.map(f => (
+            <div
+              key={f.label}
+              className="flex-shrink-0 flex items-start gap-2.5 rounded-xl bg-slate-800/50 border border-slate-700/40 px-3 py-2.5"
+              style={{ width: "188px" }}
+            >
+              <span
+                className="mt-px text-base leading-none font-mono flex-shrink-0"
+                style={{ color: f.color }}
+              >
+                {f.icon}
+              </span>
+              <div>
+                <p className="text-[11.5px] font-semibold text-slate-200 leading-tight">{f.label}</p>
+                <p className="text-[10px] text-slate-500 leading-snug mt-0.5">{f.desc}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  Experience Page
 // ─────────────────────────────────────────────────────────────────────────────
 function ExperiencePage() {
   const events = useMemo(() => parseWolfEvents(WOLF_DEMO_EVENTS), []);
   const { state, play, pause, restart, prev, next, scrubTo, setSpeed } = useReplay(events);
-  const [mode, setMode]     = useState<"watch" | "research">("watch");
+  const [mode, setMode]       = useState<"watch" | "research">("watch");
   const [selected, setSelected] = useState<string | null>(null);
+  const [showGuide, setShowGuide] = useState(true);
 
   const gs = state.gameState ?? INITIAL_GS;
   const isIdle = state.status === "idle";
@@ -605,21 +821,36 @@ function ExperiencePage() {
           )}
         </div>
 
-        {/* Mode toggle */}
-        <div className="flex items-center gap-1 bg-slate-900 rounded-lg p-0.5 border border-slate-800">
-          {(["watch", "research"] as const).map(m => (
-            <button key={m} onClick={() => setMode(m)}
-              className={`px-3 py-1 text-xs rounded-md font-medium transition-all ${
-                mode === m
-                  ? "bg-slate-700 text-white"
-                  : "text-slate-500 hover:text-slate-300"
-              }`}
+        <div className="flex items-center gap-2">
+          {/* Re-open guide */}
+          {!showGuide && (
+            <button
+              onClick={() => setShowGuide(true)}
+              title="Show feature guide"
+              className="w-7 h-7 flex items-center justify-center rounded-full border border-slate-700 text-slate-500 hover:text-slate-300 hover:border-slate-500 text-xs transition-colors"
             >
-              {m === "watch" ? "Watch" : "Research"}
+              ?
             </button>
-          ))}
+          )}
+          {/* Mode toggle */}
+          <div className="flex items-center gap-1 bg-slate-900 rounded-lg p-0.5 border border-slate-800">
+            {(["watch", "research"] as const).map(m => (
+              <button key={m} onClick={() => setMode(m)}
+                className={`px-3 py-1 text-xs rounded-md font-medium transition-all ${
+                  mode === m
+                    ? "bg-slate-700 text-white"
+                    : "text-slate-500 hover:text-slate-300"
+                }`}
+              >
+                {m === "watch" ? "Watch" : "Research"}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
+
+      {/* ── Feature guide ── */}
+      {showGuide && <FeatureGuide onClose={() => setShowGuide(false)} />}
 
       {/* ── Main area ── */}
       <div className="flex flex-1 min-h-0 overflow-hidden" style={{ minHeight: 0 }}>
@@ -680,6 +911,9 @@ function ExperiencePage() {
           />
         </div>
       </div>
+
+      {/* ── Analysis panel: full statement + observer scratchpad ── */}
+      <AnalysisPanel events={events} currentIndex={state.currentIndex} />
 
       {/* ── Event description strip ── */}
       {state.currentEvent && (
