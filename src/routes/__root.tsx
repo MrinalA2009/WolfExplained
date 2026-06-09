@@ -13,7 +13,6 @@ import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { Nav } from "../components/Nav";
 import { Footer } from "../components/Footer";
-import { CursorGlow } from "../components/CursorGlow";
 import { RouteTransition } from "../components/RouteTransition";
 import { NextSection } from "../components/NextSection";
 
@@ -115,7 +114,6 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   return (
     <QueryClientProvider client={queryClient}>
-      <CursorGlow />
       <Nav />
       <main className="relative">
         <RouteTransition>

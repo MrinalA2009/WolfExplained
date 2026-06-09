@@ -7,6 +7,7 @@ const items = [
   { to: "/experience", label: "Experience" },
   { to: "/workshops", label: "Workshops" },
   { to: "/about", label: "About" },
+  { to: "/citations", label: "Citations" },
 ] as const;
 
 export function Nav() {

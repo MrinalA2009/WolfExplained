@@ -182,20 +182,6 @@
 @utility animate-route-in  { animation: route-in  0.52s cubic-bezier(0.16,1,0.3,1) both; }
 @utility animate-story-in  { animation: story-in  0.46s cubic-bezier(0.16,1,0.3,1) both; }
 
-/* ---------- Cursor glow ---------- */
-.cursor-glow {
-  position: fixed;
-  pointer-events: none;
-  width: 320px;
-  height: 320px;
-  border-radius: 9999px;
-  background: radial-gradient(circle, color-mix(in oklab, var(--electric) 12%, transparent) 0%, transparent 60%);
-  mix-blend-mode: screen;
-  transform: translate3d(-50%,-50%,0);
-  z-index: 9;
-  transition: opacity .3s;
-}
-
 /* hairline */
 .hairline { background: linear-gradient(90deg, transparent, color-mix(in oklab, white 14%, transparent), transparent); height: 1px; }
 

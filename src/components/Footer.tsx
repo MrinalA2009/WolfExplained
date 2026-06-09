@@ -24,6 +24,7 @@ export function Footer() {
             <li><Link to="/experience" className="hover:text-gold">Experience WOLF</Link></li>
             <li><Link to="/workshops" className="hover:text-gold">Workshops</Link></li>
             <li><Link to="/about" className="hover:text-gold">About</Link></li>
+            <li><Link to="/citations" className="hover:text-gold">Citations</Link></li>
           </ul>
         </div>
         <div>

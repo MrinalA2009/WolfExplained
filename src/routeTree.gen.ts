@@ -13,6 +13,7 @@ import { Route as WorkshopsRouteImport } from './routes/workshops'
 import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
 import { Route as ResearchRouteImport } from './routes/research'
 import { Route as ExperienceRouteImport } from './routes/experience'
+import { Route as CitationsRouteImport } from './routes/citations'
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as IndexRouteImport } from './routes/index'
 
@@ -36,6 +37,11 @@ const ExperienceRoute = ExperienceRouteImport.update({
   path: '/experience',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CitationsRoute = CitationsRouteImport.update({
+  id: '/citations',
+  path: '/citations',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AboutRoute = AboutRouteImport.update({
   id: '/about',
   path: '/about',
@@ -50,6 +56,7 @@ const IndexRoute = IndexRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
+  '/citations': typeof CitationsRoute
   '/experience': typeof ExperienceRoute
   '/research': typeof ResearchRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
@@ -58,6 +65,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
+  '/citations': typeof CitationsRoute
   '/experience': typeof ExperienceRoute
   '/research': typeof ResearchRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
@@ -67,6 +75,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
+  '/citations': typeof CitationsRoute
   '/experience': typeof ExperienceRoute
   '/research': typeof ResearchRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
@@ -77,6 +86,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/about'
+    | '/citations'
     | '/experience'
     | '/research'
     | '/sitemap.xml'
@@ -85,6 +95,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/about'
+    | '/citations'
     | '/experience'
     | '/research'
     | '/sitemap.xml'
@@ -93,6 +104,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/about'
+    | '/citations'
     | '/experience'
     | '/research'
     | '/sitemap.xml'
@@ -102,6 +114,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AboutRoute: typeof AboutRoute
+  CitationsRoute: typeof CitationsRoute
   ExperienceRoute: typeof ExperienceRoute
   ResearchRoute: typeof ResearchRoute
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
@@ -138,6 +151,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ExperienceRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/citations': {
+      id: '/citations'
+      path: '/citations'
+      fullPath: '/citations'
+      preLoaderRoute: typeof CitationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/about': {
       id: '/about'
       path: '/about'
@@ -158,6 +178,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AboutRoute: AboutRoute,
+  CitationsRoute: CitationsRoute,
   ExperienceRoute: ExperienceRoute,
   ResearchRoute: ResearchRoute,
   SitemapDotxmlRoute: SitemapDotxmlRoute,

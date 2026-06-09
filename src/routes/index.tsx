@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { WolfNetwork } from "../components/WolfNetwork";
 import { MagneticButton } from "../components/MagneticButton";
@@ -248,7 +248,7 @@ function PillarsSection() {
               <h3 className="mt-5 font-display text-[1.35rem] tracking-tight leading-snug">{p.title}</h3>
               <p className="mt-4 text-sm text-muted-foreground leading-[1.7]">{p.body}</p>
               <div className="mt-7 flex items-center gap-2 text-xs text-foreground/55 group-hover:text-gold transition-colors">
-                <Link to="/research">Read the paper</Link>
+                <a href="https://arxiv.org/abs/2512.09187" target="_blank" rel="noopener noreferrer">Paper description</a>
                 <span>→</span>
               </div>
             </article>
