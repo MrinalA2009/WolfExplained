@@ -29,7 +29,7 @@ function Research() {
     <div>
       <PageHeader
         section="Research"
-        kicker="ARXIV · 2512.09187"
+
         title={<>What language models reveal <span className="text-foreground/55">when they're forced to lie.</span></>}
         description="WOLF is a multi-agent benchmark built around the social deduction game Werewolf. Across 100 runs we recorded 7,320 statements — every utterance, vote, and inferred relationship — building a quantitative window into deception, persuasion, and social reasoning in LLMs."
       />

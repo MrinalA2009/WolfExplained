@@ -2,7 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { type ReactNode } from "react";
 
 interface Props {
-  kicker: string;
+  kicker?: string;
   title: ReactNode;
   description?: ReactNode;
   section: string;
@@ -16,10 +16,12 @@ export function PageHeader({ kicker, title, description, section }: Props) {
         <span className="opacity-40">/</span>
         <span className="text-foreground/80">{section.toUpperCase()}</span>
       </nav>
-      <div className="mt-6 flex items-center gap-3 font-mono text-[11px] tracking-[0.3em] text-gold/80">
-        <span className="h-1 w-1 rounded-full bg-gold shadow-[0_0_8px_var(--gold)]" />
-        {kicker}
-      </div>
+      {kicker && (
+        <div className="mt-6 flex items-center gap-3 font-mono text-[11px] tracking-[0.3em] text-gold/80">
+          <span className="h-1 w-1 rounded-full bg-gold shadow-[0_0_8px_var(--gold)]" />
+          {kicker}
+        </div>
+      )}
       <h1 className="mt-5 font-display text-[clamp(2.5rem,5.5vw,4.75rem)] font-light tracking-[-0.02em] leading-[1.05] max-w-4xl text-balance">
         {title}
       </h1>

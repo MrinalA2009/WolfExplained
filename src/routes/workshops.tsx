@@ -113,7 +113,6 @@ const TAGS = [
 
 function WorkshopsPage() {
   const upcomingRef = useRef<HTMLElement>(null);
-  const contactRef = useRef<HTMLElement>(null);
 
   const scrollTo = (ref: React.RefObject<HTMLElement | null>) => {
     ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -121,27 +120,21 @@ function WorkshopsPage() {
 
   return (
     <div>
-      <WorkshopHero
-        onViewUpcoming={() => scrollTo(upcomingRef)}
-        onContactHost={() => scrollTo(contactRef)}
-      />
+      <WorkshopHero onViewUpcoming={() => scrollTo(upcomingRef)} />
       <MissionSection />
       <LearnSection />
       <ResearchSection />
       <AudienceSection />
       <UpcomingSection ref={upcomingRef} />
       <InstructorSection />
-      <ContactSection ref={contactRef} />
     </div>
   );
 }
 
 function WorkshopHero({
   onViewUpcoming,
-  onContactHost,
 }: {
   onViewUpcoming: () => void;
-  onContactHost: () => void;
 }) {
   return (
     <section className="relative min-h-[100svh] w-full overflow-hidden flex items-center justify-center">
@@ -152,13 +145,6 @@ function WorkshopHero({
       </div>
 
       <div className="relative z-10 mx-auto max-w-4xl px-6 pt-28 pb-20 text-center">
-        <Reveal>
-          <div className="font-mono text-[11px] tracking-[0.3em] text-gold/80 inline-flex items-center gap-2">
-            <span className="h-1 w-1 rounded-full bg-gold shadow-[0_0_8px_var(--gold)]" />
-            PUBLIC EDUCATION INITIATIVE
-          </div>
-        </Reveal>
-
         <Reveal delay={100}>
           <h1 className="mt-6 font-display text-[clamp(2.8rem,7vw,6rem)] font-light tracking-[-0.03em] leading-[1.02] text-balance">
             AI Literacy{" "}
@@ -188,9 +174,7 @@ function WorkshopHero({
               View Upcoming Workshops
               <span className="opacity-75">↓</span>
             </MagneticButton>
-            <MagneticButton variant="ghost" onClick={onContactHost}>
-              Contact for Hosting
-            </MagneticButton>
+
           </div>
         </Reveal>
       </div>
@@ -490,46 +474,3 @@ function InstructorSection() {
     </section>
   );
 }
-
-const ContactSection = function ContactSection({
-  ref,
-}: {
-  ref: React.RefObject<HTMLElement | null>;
-}) {
-  return (
-    <section ref={ref} className="mx-auto max-w-7xl px-6 py-24 scroll-mt-24">
-      <Reveal>
-        <div className="relative overflow-hidden rounded-[2rem] glass-strong p-12 md:p-20">
-          <div className="absolute inset-0 -z-10">
-            <WolfNetwork phase={4} />
-            <div className="absolute inset-0 bg-gradient-to-br from-background/85 via-background/55 to-background/85" />
-          </div>
-
-          <div className="max-w-2xl">
-            <div className="font-mono text-[11px] tracking-[0.3em] text-gold/80">HOST A WORKSHOP</div>
-            <h2 className="mt-5 font-display text-4xl md:text-5xl font-light tracking-tight leading-[1.06] text-balance">
-              Interested in Hosting a Workshop?
-            </h2>
-            <p className="mt-7 text-base text-muted-foreground leading-relaxed">
-              Workshops can be adapted for libraries, schools, community centers, senior centers,
-              nonprofits, and public organizations. Sessions can be delivered online or in person
-              and can be adjusted for technical or nontechnical audiences.
-            </p>
-            <div className="mt-10 flex flex-wrap items-center gap-5">
-              <MagneticButton href="mailto:smmrinal2009@gmail.com" variant="primary">
-                Contact Mrinal
-                <span className="opacity-75">→</span>
-              </MagneticButton>
-              <a
-                href="mailto:smmrinal2009@gmail.com"
-                className="font-mono text-[11px] tracking-[0.2em] text-muted-foreground hover:text-foreground transition-colors"
-              >
-                smmrinal2009@gmail.com
-              </a>
-            </div>
-          </div>
-        </div>
-      </Reveal>
-    </section>
-  );
-};

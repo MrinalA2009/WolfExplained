@@ -18,7 +18,7 @@ export const Route = createFileRoute("/experience")({
 });
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
-const CX = 280, CY = 262, R = 192, NODE_R = 30;
+const CX = 280, CY = 270, R = 192, NODE_R = 30;
 const ARC_R  = NODE_R + 11;
 const PLAYER_ORDER = PLAYERS.map(p => p.name);
 
@@ -69,12 +69,20 @@ interface ANProps {
 }
 
 function AgentNode({ player, pos, mode, selected, onClick }: ANProps) {
-  const alive   = player.status === "alive";
+  const alive    = player.status === "alive";
   const speaking = player.isSpeaking;
   const roleColor = ROLE_COLORS[player.role];
   const accent   = mode === "research" ? roleColor : "rgba(148,163,184,0.6)";
   const arcCirc  = 2 * Math.PI * ARC_R;
   const arcDash  = player.suspicionScore * arcCirc;
+
+  // Outward unit vector: from circle center → this node's position.
+  // Labels are placed along this vector so they never overlap node graphics.
+  const _dx = pos.x - CX, _dy = pos.y - CY;
+  const _d  = Math.sqrt(_dx * _dx + _dy * _dy) || 1;
+  const nx  = _dx / _d, ny = _dy / _d;
+  // Text anchor: "middle" for top/bottom nodes, "end"/"start" for side nodes
+  const txAnchor = Math.abs(nx) < 0.25 ? "middle" : nx < 0 ? "end" : "start";
 
   return (
     <g
@@ -82,11 +90,11 @@ function AgentNode({ player, pos, mode, selected, onClick }: ANProps) {
       onClick={alive ? onClick : undefined}
       style={{ cursor: alive ? "pointer" : "default", opacity: alive ? 1 : 0.2, transition: "opacity 0.5s" }}
     >
-      {/* Speaking pulse ring */}
+      {/* Speaking pulse ring — kept small so it never overlaps labels */}
       {speaking && alive && (
-        <circle r={NODE_R + 5} fill="none" stroke="var(--gold)" strokeWidth={1.5} opacity={0}>
-          <animate attributeName="r"       values={`${NODE_R+5};${NODE_R+20};${NODE_R+5}`} dur="1.8s" repeatCount="indefinite"/>
-          <animate attributeName="opacity" values="0.65;0;0.65"                            dur="1.8s" repeatCount="indefinite"/>
+        <circle r={NODE_R + 3} fill="none" stroke="var(--gold)" strokeWidth={1} opacity={0}>
+          <animate attributeName="r"       values={`${NODE_R+3};${NODE_R+13};${NODE_R+3}`} dur="2s" repeatCount="indefinite"/>
+          <animate attributeName="opacity" values="0.5;0;0.5"                              dur="2s" repeatCount="indefinite"/>
         </circle>
       )}
 
@@ -127,19 +135,31 @@ function AgentNode({ player, pos, mode, selected, onClick }: ANProps) {
         {player.name[0]}
       </text>
 
-      {/* Name */}
+      {/* Name — placed outward from node along nx/ny so it never overlaps the arc or pulse */}
       <text
-        textAnchor="middle" y={NODE_R + 16} fontSize="10"
-        fill={alive ? "rgba(203,213,225,0.75)" : "rgba(100,116,139,0.3)"}
+        textAnchor={txAnchor}
+        dominantBaseline="central"
+        x={nx * (NODE_R + 20)}
+        y={ny * (NODE_R + 20)}
+        fontSize="11"
         fontWeight={speaking ? "600" : "400"}
-        style={{ transition: "font-weight 0.2s" }}
+        fill={alive ? "rgba(226,232,240,0.9)" : "rgba(100,116,139,0.3)"}
       >
         {player.name}
       </text>
 
-      {/* Role (research only) */}
+      {/* Role (research only) — one step further out than the name */}
       {mode === "research" && alive && (
-        <text textAnchor="middle" y={NODE_R + 28} fontSize="8" fill={roleColor} opacity={0.6} letterSpacing="0.04em">
+        <text
+          textAnchor={txAnchor}
+          dominantBaseline="central"
+          x={nx * (NODE_R + 35)}
+          y={ny * (NODE_R + 35)}
+          fontSize="9.5"
+          fill={roleColor}
+          opacity={0.8}
+          letterSpacing="0.05em"
+        >
           {player.role}
         </text>
       )}
@@ -234,19 +254,19 @@ function GameBoard({
       ))}
 
       {/* Center labels */}
-      <text x={CX} y={CY - 13} textAnchor="middle" fontSize="9"
-        fill="rgba(100,116,139,0.45)" letterSpacing="0.1em">
+      <text x={CX} y={CY - 15} textAnchor="middle" fontSize="9.5"
+        fill="rgba(148,163,184,0.65)" letterSpacing="0.1em">
         {PHASE_LABEL[gs.phase]?.toUpperCase() ?? gs.phase.toUpperCase()}
       </text>
-      <text x={CX} y={CY + 9} textAnchor="middle" fontSize="16" fontWeight="300"
-        fill={gs.round === 0 ? "rgba(100,116,139,0.5)" : "rgba(226,232,240,0.88)"}
+      <text x={CX} y={CY + 9} textAnchor="middle" fontSize="17" fontWeight="300"
+        fill={gs.round === 0 ? "rgba(148,163,184,0.6)" : "rgba(226,232,240,0.95)"}
         style={{ fontFamily: "var(--font-display)" }}>
         {gs.winner
           ? gs.winner === "Werewolves" ? "Wolves Win" : "Villagers Win"
           : gs.round === 0 ? "Ready" : `Round ${gs.round}`}
       </text>
-      <text x={CX} y={CY + 26} textAnchor="middle" fontSize="9"
-        fill="rgba(100,116,139,0.35)" letterSpacing="0.04em">
+      <text x={CX} y={CY + 28} textAnchor="middle" fontSize="9.5"
+        fill="rgba(100,116,139,0.55)" letterSpacing="0.04em">
         {gs.alivePlayers.length} alive
       </text>
     </svg>
@@ -654,7 +674,7 @@ function TimelineBar({ events, currentIndex, onScrub }: { events: ReplayEvent[];
 function ExperiencePage() {
   const events = useMemo(() => parseWolfEvents(WOLF_DEMO_EVENTS), []);
   const { state, play, pause, restart, prev, next, scrubTo, setSpeed } = useReplay(events);
-  const [mode, setMode]     = useState<"watch" | "research">("watch");
+  const [mode, setMode]     = useState<"watch" | "research">("research");
   const [selected, setSelected] = useState<string | null>(null);
 
   const gs     = state.gameState ?? INITIAL_GS;

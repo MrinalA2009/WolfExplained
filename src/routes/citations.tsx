@@ -64,7 +64,7 @@ function Citations() {
     <div>
       <PageHeader
         section="Citations"
-        kicker="IMPACT · 6 PAPERS"
+
         title={<>Research building on <span className="text-foreground/55">WOLF's framework.</span></>}
         description="These papers cite WOLF (arXiv 2512.09187), extending its framework for studying deception, trust, and social reasoning in large language models across new settings and methodologies."
       />

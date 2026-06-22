@@ -146,12 +146,6 @@ function HeroSection() {
 
         {/* Headline */}
         <div>
-          <Reveal delay={80}>
-            <div className="flex items-center gap-2 font-mono text-[10px] tracking-[0.3em] text-gold/80 mb-6">
-              <span className="h-1 w-1 rounded-full bg-gold shadow-[0_0_8px_var(--gold)]" />
-              ABOUT THE RESEARCHER
-            </div>
-          </Reveal>
           <Reveal delay={160}>
             <h1 className="font-display text-[clamp(3rem,6vw,5.5rem)] font-light tracking-[-0.03em] leading-[1.02] text-balance">
               Building safer and more trustworthy{" "}
