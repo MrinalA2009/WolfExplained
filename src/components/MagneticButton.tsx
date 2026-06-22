@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router";
 import { type ReactNode } from "react";
 
 export function MagneticButton({
@@ -60,6 +61,15 @@ export function MagneticButton({
   };
 
   if (href) {
+    const isExternal = href.startsWith("http") || href.startsWith("//") || href.startsWith("mailto:");
+    if (!isExternal) {
+      return (
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        <Link to={href as any} className={`${base} ${styles} ${className}`} {...handlers}>
+          {content}
+        </Link>
+      );
+    }
     return (
       <a href={href} target={target} rel={rel} className={`${base} ${styles} ${className}`} {...handlers}>
         {content}
