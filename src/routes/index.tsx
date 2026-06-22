@@ -62,16 +62,6 @@ function Hero() {
       </div>
 
       <div className="relative z-10 flex h-full flex-col items-center justify-center px-6 text-center">
-        <Reveal>
-          <div className="glass inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-[11px] font-mono uppercase tracking-[0.22em] text-foreground/75">
-            <span className="relative flex h-1.5 w-1.5">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-gold opacity-55" />
-              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-gold" />
-            </span>
-            arXiv · 2512.09187
-          </div>
-        </Reveal>
-
         <Reveal delay={120}>
           <h1 className="mt-8 font-display text-[clamp(4.5rem,14vw,12rem)] font-light leading-[0.88] tracking-[-0.04em]">
             <span className="bg-gradient-to-b from-white via-white to-white/40 bg-clip-text text-transparent">
